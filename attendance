@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>出席ページへジャンプ</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "メイリオ", sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f7f7f8; }
+    .card { background:#fff; padding:24px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06); width:420px; }
+    .label { display:block; font-size:14px; color:#222; margin-bottom:8px; }
+    input[type="text"]{ width:100%; padding:10px 8px; margin-bottom:12px; box-sizing:border-box; font-size:16px; }
+    button{ width:100%; padding:10px; font-size:16px; cursor:pointer; }
+    .hint{ color:#666; font-size:13px; margin-top:8px; }
+    .error { color:#b00; font-size:14px; margin-top:8px; display:none; }
+    fieldset { border: none; padding: 0; margin: 6px 0 14px 0; }
+    .campus { display:flex; gap:12px; align-items:center; margin-bottom:6px; }
+    .campus label { font-size:14px; color:#333; cursor:pointer; display:flex; align-items:center; gap:6px; }
+    .requirements { color:#444; font-size:13px; margin-bottom:8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2 style="margin:0 0 12px 0; font-size:18px;">教室IDを入力</h2>
+
+    <!-- 校舎選択（相互排他） -->
+    <fieldset aria-label="校舎選択">
+      <legend style="font-size:14px; margin-bottom:6px;">校舎を選択</legend>
+      <div class="campus">
+        <label><input type="radio" name="campus" value="新習志野" checked /> 新習志野</label>
+        <label><input type="radio" name="campus" value="津田沼" /> 津田沼</label>
+      </div>
+    </fieldset>
+
+    <div class="requirements" id="requirements">新習志野：4桁のみ。津田沼：3桁または4桁。</div>
+
+    <label for="roomInput" class="label">教室入力</label>
+
+    <form id="jumpForm" novalidate>
+      <input id="roomInput" type="text" inputmode="numeric" pattern="\d*" placeholder="例: 1234" autocomplete="off" />
+      <button type="submit">移動する</button>
+    </form>
+    <div id="error" class="error">入力した数が正しくありません</div>
+    <div class="hint">半角数字のみ入力できます。選択した校舎は campus クエリとして付与されます。</div>
+  </div>
+
+  <script>
+    (function () {
+      const base = 'https://attendance.is.it-chiba.ac.jp/attendance/class_room/';
+      const topPath = '/attendance/top';
+      const form = document.getElementById('jumpForm');
+      const input = document.getElementById('roomInput');
+      const errorEl = document.getElementById('error');
+      const reqEl = document.getElementById('requirements');
+
+      // 現在の選択校舎を取得
+      function getSelectedCampus() {
+        const radios = document.getElementsByName('campus');
+        for (let i = 0; i < radios.length; i++) {
+          if (radios[i].checked) return radios[i].value;
+        }
+        return '';
+      }
+
+      // 校舎ごとの検証ルール
+      // 新習志野 -> 4桁のみ
+      // 津田沼 -> 3桁または4桁
+      function isValidForCampus(value, campus) {
+        const len = value.length;
+        if (campus === '新習志野') return len === 4;
+        if (campus === '津田沼') return len === 3 || len === 4;
+        return false;
+      }
+
+      function showError(msg) {
+        errorEl.textContent = msg || '入力した数が正しくありません';
+        errorEl.style.display = 'block';
+      }
+      function hideError() {
+        errorEl.style.display = 'none';
+      }
+
+      // 入力中に半角数字以外を除去し、maxlength を超えたら切る
+      input.addEventListener('input', function (e) {
+        const before = e.target.value;
+        let cleaned = before.replace(/\D/g, '');
+        const max = input.getAttribute('maxlength');
+        if (max) {
+          cleaned = cleaned.slice(0, parseInt(max, 10));
+        }
+        if (before !== cleaned) {
+          e.target.value = cleaned;
+        }
+        hideError();
+      });
+
+      // ペースト時に非数字を取り除き、maxlength に合わせる
+      input.addEventListener('paste', function (e) {
+        e.preventDefault();
+        const clipboard = (e.clipboardData || window.clipboardData).getData('text') || '';
+        let cleaned = clipboard.replace(/\D/g, '');
+        const max = input.getAttribute('maxlength');
+        if (max) cleaned = cleaned.slice(0, parseInt(max, 10));
+        const start = input.selectionStart || input.value.length;
+        const end = input.selectionEnd || input.value.length;
+        input.value = input.value.slice(0, start) + cleaned + input.value.slice(end);
+        const pos = start + cleaned.length;
+        input.setSelectionRange(pos, pos);
+        input.dispatchEvent(new Event('input'));
+      });
+
+      // 校舎選択が変わったら maxlength とプレースホルダを更新して UX を改善
+      function updateInputConstraints() {
+        const campus = getSelectedCampus();
+        if (campus === '新習志野') {
+          input.setAttribute('maxlength', '4');
+          input.placeholder = '例: 1234';
+        } else if (campus === '津田沼') {
+          // 最大は4だが3も許容
+          input.setAttribute('maxlength', '4');
+          input.placeholder = '例: 123 または 1234';
+        } else {
+          input.removeAttribute('maxlength');
+          input.placeholder = '例: 1234';
+        }
+        hideError();
+      }
+
+      // ラジオの change イベントを監視
+      const radios = document.getElementsByName('campus');
+      for (let i = 0; i < radios.length; i++) {
+        radios[i].addEventListener('change', updateInputConstraints);
+      }
+      // 初期設定
+      updateInputConstraints();
+
+      function buildUrl(value, campus) {
+        const trimmed = value.trim().replace(/^\/+|\/+$/g, '');
+        const encodedId = encodeURIComponent(trimmed);
+        const encodedCampus = campus ? 'campus=' + encodeURIComponent(campus) : '';
+        return base + encodedId + (encodedCampus ? ('?' + encodedCampus) : '');
+      }
+
+      // サーバーへHEADリクエストを送り、最終的なURLを確認する。
+      // CORS 等でブロックされたりタイムアウトしたらフォールバックで遷移する（確認不可時は遷移）。
+      async function checkThenNavigate(url) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+
+        try {
+          const resp = await fetch(url, {
+            method: 'HEAD',
+            redirect: 'follow',
+            credentials: 'include',
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+
+          const finalUrl = resp && resp.url ? resp.url : '';
+          if (finalUrl) {
+            try {
+              const parsed = new URL(finalUrl);
+              if (parsed.pathname.endsWith(topPath) || parsed.pathname === topPath) {
+                showError('入力した数が正しくありません');
+                return;
+              }
+            } catch (err) {
+              // 解析失敗したらフォールバックで遷移
+            }
+          }
+          window.location.href = url;
+        } catch (err) {
+          clearTimeout(timeout);
+          // CORS/タイムアウト等で判定できない場合はフォールバックで遷移
+          window.location.href = url;
+        }
+      }
+
+      // 送信前に空/桁数を検証する
+      function redirectTo(value) {
+        const cleaned = String(value || '').replace(/\D/g, '');
+        if (!cleaned) {
+          showError('教室IDを半角数字で入力してください。');
+          return;
+        }
+        const campus = getSelectedCampus();
+        if (!isValidForCampus(cleaned, campus)) {
+          showError('入力した数が正しくありません');
+          return;
+        }
+        const url = buildUrl(cleaned, campus);
+        checkThenNavigate(url);
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        hideError();
+        redirectTo(input.value);
+      });
+
+      // ?q= と ?campus= を受け取れば自動でリダイレクト（非数字除去）。桁数が合わなければ遷移せずエ���ー表示。
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const q = params.get('q');
+        const campusParam = params.get('campus');
+        if (campusParam) {
+          const radios = document.getElementsByName('campus');
+          for (let i = 0; i < radios.length; i++) {
+            if (radios[i].value === campusParam) {
+              radios[i].checked = true;
+              break;
+            }
+          }
+          updateInputConstraints();
+        }
+        if (q) {
+          const cleaned = String(q).replace(/\D/g, '');
+          input.value = cleaned;
+          // 自動遷移する前に検証する
+          setTimeout(() => redirectTo(cleaned), 150);
+        }
+      } catch (err) {
+        console.warn(err);
+      }
+    })();
+  </script>
+</body>
+</html>
